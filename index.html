@@ -14,7 +14,7 @@ video{width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
 canvas{position:absolute;inset:0;width:100%;height:100%;transform:scaleX(-1)}
 .row{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}input,button{border:0;border-radius:10px;padding:12px;font-size:15px}
 input{width:100%;background:#fff;color:#111}button{cursor:pointer;background:#2563eb;color:white}button.secondary{background:#475569}button.ok{background:#16a34a}button.danger{background:#dc2626}
-.status{margin-top:15px;padding:14px;border-radius:10px;background:#0f172a}.big{font-size:28px;font-weight:700}.small{font-size:13px;color:#cbd5e1}
+.status{margin-top:15px;padding:14px;border-radius:10px;background:#0f172a;min-height:70px;overflow-wrap:anywhere}.big{font-size:28px;font-weight:700}.small{font-size:13px;color:#cbd5e1}
 .badge{display:inline-block;padding:5px 9px;border-radius:999px;background:#334155;margin:3px}
 @media(max-width:800px){.grid{grid-template-columns:1fr}.top{align-items:flex-start;flex-direction:column}}
 </style>
@@ -39,7 +39,7 @@ input{width:100%;background:#fff;color:#111}button{cursor:pointer;background:#25
       </div>
       <div id="status" class="status">
         <div class="big">Kamera belum aktif</div>
-        <div class="small">Masukkan ID Guru, lalu lakukan verifikasi di depan kamera.</div>
+        <div class="small">Masukkan ID Guru, lalu aktifkan kamera. Sistem akan memberi notifikasi jelas saat wajah dikenali atau tidak.</div>
       </div>
     </div>
 
