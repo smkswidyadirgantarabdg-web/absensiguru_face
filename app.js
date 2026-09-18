@@ -62,30 +62,39 @@ async function detectLoop(){
   requestAnimationFrame(detectLoop);
 }
 async function captureDescriptor(){
-  const opts=new faceapi.TinyFaceDetectorOptions({inputSize:416,scoreThreshold:.60});
-  const d=await faceapi.detectSingleFace(video,opts).withFaceLandmarks().withFaceDescriptor();
-  if(!d)throw new Error("Wajah belum terdeteksi.");
-  const all=await faceapi.detectAllFaces(video,opts);
-  if(all.length!==1)throw new Error("Pastikan hanya ada satu wajah di depan kamera.");
+  const opts=new faceapi.TinyFaceDetectorOptions({inputSize:416,scoreThreshold:.50});
+  // Detect ALL faces first so we never accidentally extract one face
+  // while another person is also visible.
+  const all=await faceapi.detectAllFaces(video,opts).withFaceLandmarks().withFaceDescriptors();
+  if(all.length===0)throw new Error("Wajah belum terdeteksi. Posisikan wajah di tengah kamera.");
+  if(all.length>1)throw new Error("Terdeteksi lebih dari satu wajah. Pastikan hanya satu wajah di kamera.");
+  const d=all[0];
+  if(!d.descriptor || d.descriptor.length!==128)throw new Error("Data wajah tidak berhasil dibuat. Coba lagi.");
   return Array.from(d.descriptor);
 }
 function livenessBasic(){
-  // Pemeriksaan dasar: meminta pengguna melakukan gerakan kepala.
-  // Untuk keamanan lebih tinggi, gunakan modul challenge-response/blink di versi lanjutan.
+  // Lightweight liveness: require a small horizontal head movement.
+  // The original 1.8 s / 3 px check was too strict on many phone cameras.
   return new Promise(resolve=>{
     const start=performance.now(), samples=[];
+    const duration=3200, minSamples=4, minMove=2;
     const timer=setInterval(async()=>{
       try{
-        const opts=new faceapi.TinyFaceDetectorOptions({inputSize:320,scoreThreshold:.55});
-        const d=await faceapi.detectSingleFace(video,opts).withFaceLandmarks();
-        if(d)samples.push(d.landmarks.getNose().x);
+        const opts=new faceapi.TinyFaceDetectorOptions({inputSize:320,scoreThreshold:.45});
+        const all=await faceapi.detectAllFaces(video,opts).withFaceLandmarks();
+        if(all.length===1){
+          samples.push(all[0].landmarks.getNose().x);
+          if(!busy)status("Uji wajah aktif…","Gerakkan kepala sedikit ke kiri lalu ke kanan.");
+        } else if(all.length>1 && !busy){
+          status("Lebih dari satu wajah","Pastikan hanya satu wajah di kamera.");
+        }
       }catch(e){}
-      if(performance.now()-start>1800){
+      if(performance.now()-start>=duration){
         clearInterval(timer);
-        const moved=samples.length>3 && Math.max(...samples)-Math.min(...samples)>3;
+        const moved=samples.length>=minSamples && (Math.max(...samples)-Math.min(...samples)>=minMove);
         resolve(moved);
       }
-    },180);
+    },160);
   });
 }
 async function loadGuru(){
@@ -105,33 +114,42 @@ async function enroll(){
   busy=true;
   try{
     await startCamera();
-    status("Pendaftaran wajah…","Lihat kamera dan gerakkan kepala perlahan.");
+    status("Pendaftaran wajah","Lihat kamera. Gerakkan kepala sedikit ke kiri lalu ke kanan.");
     const live=await livenessBasic();
-    if(!live)throw new Error("Gerakan wajah tidak terdeteksi. Ulangi dengan gerakan kepala perlahan.");
+    if(!live)throw new Error("Wajah belum berhasil diverifikasi sebagai wajah hidup. Pastikan pencahayaan cukup dan gerakkan kepala sedikit ke kiri-kanan.");
+    status("Mengambil data wajah…","Jangan bergerak selama beberapa detik.");
     const desc=await captureDescriptor();
+    status("Menyimpan wajah…","Mengirim descriptor ke server.");
     const r=await jsonp({action:"enrollFace",guruId:selectedGuru.id,descriptor:JSON.stringify(desc)});
     if(!r.ok)throw new Error(r.message||"Gagal menyimpan wajah.");
-    status("Wajah berhasil didaftarkan",selectedGuru.nama);
+    selectedGuru.hasFace=true;
+    status("✓ WAJAH BERHASIL DIDAFTARKAN",`${selectedGuru.nama} (${selectedGuru.id})`);
     await loadGuru();
-  }catch(e){status("Gagal",e.message)}
-  finally{busy=false}
+  }catch(e){
+    status("✕ PENDAFTARAN GAGAL",e.message);
+  }finally{busy=false}
 }
 async function verify(){
   if(!selectedGuru)await loadGuru();
   if(!selectedGuru)return;
   busy=true;
   try{
+    if(!selectedGuru.hasFace)throw new Error("Wajah guru belum didaftarkan. Daftarkan wajah terlebih dahulu.");
     await startCamera();
-    status("Verifikasi…","Jangan bergerak terlalu cepat.");
+    status("Verifikasi wajah","Gerakkan kepala sedikit ke kiri lalu ke kanan.");
     const live=await livenessBasic();
-    if(!live)throw new Error("Liveness dasar gagal. Gerakkan kepala sedikit lalu ulangi.");
+    if(!live)throw new Error("Liveness gagal. Pastikan pencahayaan cukup dan gerakkan kepala sedikit.");
+    status("Mencocokkan wajah…","Mohon tunggu.");
     const desc=await captureDescriptor();
     const r=await jsonp({action:"verifyFace",guruId:selectedGuru.id,descriptor:JSON.stringify(desc)});
-    if(!r.ok)throw new Error(r.message||"Wajah tidak cocok.");
+    if(!r.ok){
+      status("✕ WAJAH TIDAK DIKENALI",`${selectedGuru.nama} — jarak: ${Number(r.distance||0).toFixed(4)}`);
+      return;
+    }
     const a=await jsonp({action:"recordAttendance",guruId:selectedGuru.id,score:r.distance});
-    if(!a.ok)throw new Error(a.message||"Gagal menyimpan absensi.");
-    status("ABSEN BERHASIL",`${selectedGuru.nama} — ${a.jam} — ${a.status}`);
-  }catch(e){status("VERIFIKASI GAGAL",e.message)}
+    if(!a.ok)throw new Error(a.message||"Wajah dikenali, tetapi absensi gagal disimpan.");
+    status("✓ WAJAH DIKENALI — ABSEN BERHASIL",`${selectedGuru.nama} — ${a.jam} — ${a.status} — jarak ${Number(r.distance).toFixed(4)}`);
+  }catch(e){status("✕ VERIFIKASI GAGAL",e.message)}
   finally{busy=false}
 }
 function escapeHtml(s){return String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]))}
